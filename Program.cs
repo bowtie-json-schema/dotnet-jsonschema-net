@@ -99,15 +99,15 @@ while (cmdSource.GetNextCommand() is { } line && line != "")
                 buildOptions.SchemaRegistry.Fetch = (uri, _) =>
                 {
                     var element = JsonSerializer.SerializeToElement(registry[uri]);
-                    return JsonSchema.Build(element, buildOptions);
+                    return JsonSchema.Build(element, buildOptions, uri);
                 };
             }
 
-            var schema = JsonSchema.Build(schemaText, buildOptions);
             var tests = testCase["tests"]!.AsArray();
 
             try
             {
+                var schema = JsonSchema.Build(schemaText, buildOptions);
                 var results = new JsonArray();
 
                 foreach (var test in tests)
