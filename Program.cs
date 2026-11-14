@@ -103,6 +103,11 @@ while (cmdSource.GetNextCommand() is { } line && line != "")
                 };
             }
 
+            var output = root["output"]?.GetValue<string>();
+            evaluationOptions.OutputFormat = output == "annotations"
+                ? OutputFormat.Hierarchical
+                : OutputFormat.Flag;
+
             var tests = testCase["tests"]!.AsArray();
 
             try
@@ -115,7 +120,28 @@ while (cmdSource.GetNextCommand() is { } line && line != "")
                     testDescription = test!["description"]!.GetValue<string>();
                     var instance = JsonSerializer.SerializeToElement(test["instance"]);
                     var validationResult = schema.Evaluate(instance, evaluationOptions);
-                    var testResult = JsonSerializer.SerializeToNode(validationResult);
+
+                    JsonObject testResult;
+                    if (output == "annotations")
+                    {
+                        var annotations = new JsonArray();
+                        if (validationResult.IsValid)
+                        {
+                            CollectAnnotations(validationResult, annotations);
+                        }
+                        testResult = new JsonObject
+                        {
+                            ["valid"] = validationResult.IsValid,
+                            ["annotations"] = annotations
+                        };
+                    }
+                    else
+                    {
+                        testResult = new JsonObject
+                        {
+                            ["valid"] = validationResult.IsValid
+                        };
+                    }
                     results.Add(testResult);
                 }
 
@@ -166,6 +192,62 @@ static string GetLibVersion()
 {
     var attribute = typeof(JsonSchema).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
     return Regex.Match(attribute!.InformationalVersion, @"\d+(\.\d+)+").Value;
+}
+
+static void CollectAnnotations(EvaluationResults node, JsonArray annotations)
+{
+    if (!node.IsValid)
+    {
+        return;
+    }
+
+    if (node.Annotations != null)
+    {
+        foreach (var (keyword, val) in node.Annotations)
+        {
+            var annObj = new JsonObject
+            {
+                ["keyword"] = keyword,
+                ["instanceLocation"] = node.InstanceLocation.ToString(),
+                ["annotation"] = JsonNode.Parse(val.GetRawText())
+            };
+            if (node.SchemaLocation != null)
+            {
+                var orig = node.SchemaLocation.OriginalString;
+                string akLoc;
+                if (orig.EndsWith('/'))
+                {
+                    akLoc = $"{orig}{keyword}";
+                }
+                else if (orig.EndsWith('#') || orig.Contains('#'))
+                {
+                    akLoc = $"{orig}/{keyword}";
+                }
+                else
+                {
+                    akLoc = $"{orig}#/{keyword}";
+                }
+                if (Uri.TryCreate(akLoc, UriKind.Absolute, out var uri))
+                {
+                    akLoc = uri.AbsoluteUri;
+                }
+                annObj["absoluteKeywordLocation"] = akLoc;
+            }
+            else
+            {
+                var kwPtr = node.EvaluationPath.Combine(keyword);
+                annObj["keywordLocation"] = "#" + kwPtr.ToString();
+            }
+            annotations.Add(annObj);
+        }
+    }
+    if (node.Details != null)
+    {
+        foreach (var child in node.Details)
+        {
+            CollectAnnotations(child, annotations);
+        }
+    }
 }
 
 class UnknownCommand : Exception
