@@ -103,6 +103,11 @@ while (cmdSource.GetNextCommand() is { } line && line != "")
                 };
             }
 
+            var output = root["output"]?.GetValue<string>();
+            evaluationOptions.OutputFormat = output == "annotations"
+                ? OutputFormat.List
+                : OutputFormat.Flag;
+
             var tests = testCase["tests"]!.AsArray();
 
             try
@@ -115,7 +120,59 @@ while (cmdSource.GetNextCommand() is { } line && line != "")
                     testDescription = test!["description"]!.GetValue<string>();
                     var instance = JsonSerializer.SerializeToElement(test["instance"]);
                     var validationResult = schema.Evaluate(instance, evaluationOptions);
-                    var testResult = JsonSerializer.SerializeToNode(validationResult);
+
+                    JsonObject testResult;
+                    if (output == "annotations")
+                    {
+                        var annotations = new JsonArray();
+                        if (validationResult.IsValid && validationResult.Details != null)
+                        {
+                            foreach (var node in validationResult.Details)
+                            {
+                                if (node.Annotations == null) continue;
+                                foreach (var (keyword, val) in node.Annotations)
+                                {
+                                    var orig = node.SchemaLocation.OriginalString;
+                                    string akLoc;
+                                    if (orig.EndsWith('/'))
+                                    {
+                                        akLoc = $"{orig}{keyword}";
+                                    }
+                                    else if (orig.EndsWith('#') || orig.Contains('#'))
+                                    {
+                                        akLoc = $"{orig}/{keyword}";
+                                    }
+                                    else
+                                    {
+                                        akLoc = $"{orig}#/{keyword}";
+                                    }
+                                    if (Uri.TryCreate(akLoc, UriKind.Absolute, out var uri))
+                                    {
+                                        akLoc = uri.AbsoluteUri;
+                                    }
+                                    annotations.Add(new JsonObject
+                                    {
+                                        ["keyword"] = keyword,
+                                        ["instanceLocation"] = node.InstanceLocation.ToString(),
+                                        ["absoluteKeywordLocation"] = akLoc,
+                                        ["annotation"] = JsonNode.Parse(val.GetRawText())
+                                    });
+                                }
+                            }
+                        }
+                        testResult = new JsonObject
+                        {
+                            ["valid"] = validationResult.IsValid,
+                            ["annotations"] = annotations
+                        };
+                    }
+                    else
+                    {
+                        testResult = new JsonObject
+                        {
+                            ["valid"] = validationResult.IsValid
+                        };
+                    }
                     results.Add(testResult);
                 }
 
